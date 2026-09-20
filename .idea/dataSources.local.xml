@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="dataSourceStorageLocal" created-in="PY-262.10968.92">
+    <data-source name="@discordbot.7kunc62.mongodb.net" uuid="a6e397e1-36fd-48e8-a89f-8d0fa1672bc4">
+      <database-info product="Mongo DB" version="8.0.32" jdbc-version="4.2" driver-name="MongoDB JDBC Driver" driver-version="1.24" dbms="MONGO" exact-version="8.0.32" exact-driver-version="1.24" />
+      <case-sensitivity plain-identifiers="mixed" quoted-identifiers="mixed" />
+      <secret-storage>master_key</secret-storage>
+      <user-name>mainDbAcc</user-name>
+      <schema-mapping>
+        <introspection-scope>
+          <node kind="schema">
+            <name qname="@" />
+            <name qname="Guilds" />
+          </node>
+        </introspection-scope>
+      </schema-mapping>
+    </data-source>
+  </component>
+</project>
