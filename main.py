@@ -12,6 +12,10 @@ from pymongo.errors import CollectionInvalid, OperationFailure
 
 config_path = Path(os.getcwd()) / "data" / "config.json"
 
+ticket_config_path = Path(os.getcwd()) / "data" / "Ticket" / "ticket_config.json"
+
+open_tickets_path = Path(os.getcwd()) / "data" / "Ticket" / "open_tickets.json"
+
 with open(config_path, "r", encoding="utf-8") as f:
     config = json.load(f)
 
@@ -185,6 +189,20 @@ async def on_guild_join(guild: discord.Guild):
         if _has_non_default_val:
             _reset_guild_config(str(guild.id))
 
+    with open(ticket_config_path, "r+t", encoding="utf-8") as t_cfg_f:
+        ticket_config = json.load(t_cfg_f)
+
+        ticket_config[str(guild.id)] = {}
+
+        json.dump(ticket_config, t_cfg_f, indent=4)
+
+    with open(open_tickets_path, "r+t", encoding="utf-8") as t_o_f:
+        open_tickets = json.load(t_o_f)
+
+        open_tickets[str(guild.id)] = {}
+
+        json.dump(ticket_config, t_o_f, indent=4)
+
 
 @bot.event
 async def on_guild_remove(guild: discord.Guild):
@@ -196,6 +214,24 @@ async def on_guild_remove(guild: discord.Guild):
             print(f"[no-op] no guild_configs doc existed for guild {guild.id} ({guild.name})")
     except Exception as e:
         print(f"Failed to remove config for guild {guild.id} ({guild.name}): {e}")
+
+    with open(ticket_config_path, "r+t", encoding="utf-8") as t_cfg_f:
+        ticket_config = json.load(t_cfg_f)
+
+        exists = ticket_config.get(str(guild.id))
+        if exists:
+            ticket_config.pop(str(guild.id))
+
+        json.dump(ticket_config, t_cfg_f, indent=4)
+
+    with open(open_tickets_path, "r+t", encoding="utf-8") as t_o_f:
+        open_tickets = json.load(t_o_f)
+
+        exists = open_tickets.get(str(guild.id))
+        if exists:
+            open_tickets.pop(str(guild.id))
+
+        json.dump(ticket_config, t_o_f, indent=4)
 
 @bot.event
 async def on_ready():
@@ -209,6 +245,7 @@ async def on_ready():
             print(f"Failed to sync commands to dev guild {DEV_GUILD_ID}: {e}")
     else:
         print("No devGuildId set in config — skipping dev command sync.")
+
 
 
 if DEV_GUILD_ID:

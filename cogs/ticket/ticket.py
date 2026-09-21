@@ -21,12 +21,36 @@ from .transcript import generate_transcript
 
 config_path = Path(os.getcwd()) / "data" / "config.json"
 
+ticket_config_path = Path(os.getcwd()) / "data" / "Ticket" / "ticket_config.json"
+
+open_tickets_path = Path(os.getcwd()) / "data" / "Ticket" / "open_tickets.json"
+
 with open(config_path, "r", encoding="utf-8") as f:
     config = json.load(f)
 
 DEV_GUILD_ID = config.get("devGuildId")
 
+@app_commands.guilds(discord.Object(id=int(DEV_GUILD_ID)))
+class TicketGroup(app_commands.Group):
+    def __init__(self) -> None:
+        super().__init__(name="ticket", description="Ticket Main Group")
+
+    @app_commands.command(name="close", description="Close the current Ticket.")
+    async def close(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer(thinking=True, ephemeral=True)
+        await interaction.followup.send("This command has not been fully implemented yet.", ephemeral=True)
+
+    @app_commands.command(name="open", description="Opens a new Ticket.")
+    async def open(self, interaction: discord.Interaction):
+        await interaction.response.defer(thinking=True, ephemeral=True)
+        await interaction.followup.send("This command has not been fully implemented yet.", ephemeral=True)
+
+
+
+
 class TicketCog(commands.Cog):
+
+    TicketGroup = TicketGroup()
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -38,7 +62,7 @@ class TicketCog(commands.Cog):
     @app_commands.guilds(discord.Object(id=int(DEV_GUILD_ID)))
     async def transcript(self, interaction: discord.Interaction):
         await interaction.response.defer(thinking=True, ephemeral=True)
-        if interaction.user.id not in config.get("devUserId"):
+        if str(interaction.user.id) not in config.get("devUserId"):
             await interaction.followup.send("You do not have access to this Command (devOnlyCommand)", ephemeral=True)
 
 
