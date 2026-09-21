@@ -1,7 +1,6 @@
 import discord
-import discord as dc
-from discord.ext import commands as c
-from discord import app_commands as ac, Embed
+from discord.ext import commands
+from discord import app_commands
 import asyncio
 import json
 import os
@@ -19,22 +18,10 @@ with open(config_path, "r", encoding="utf-8") as f:
 DEV_GUILD_ID = config.get("devGuildId")
 DEV_USER_IDS = set(str(u) for u in config.get("devUserId", []))
 
-# NOTE: move this connection string (and the tokens in config.json) into
-# environment variables / a secrets file that isn't committed anywhere.
-# Anything pasted into a chat or a repo should be treated as compromised
-# and rotated.
 client = MongoClient(config.get("mongoUrl"))
 db = client["Guilds"]
 
 def _build_schema(required: list, properties: dict, additional_properties: bool = True) -> dict:
-    """
-    Build a MongoDB $jsonSchema validator dict.
-
-    required            -> list of required field names, e.g. ["name", "email"]
-    properties          -> dict of field_name -> BSON type spec, e.g.
-                            {"name": {"bsonType": "string"}, "age": {"bsonType": "int"}}
-    additional_properties -> whether fields outside `properties` are allowed
-    """
     return {
         "$jsonSchema": {
             "bsonType": "object",
@@ -47,19 +34,13 @@ def _build_schema(required: list, properties: dict, additional_properties: bool 
 
 def _apply_schema(collection_name: str, schema: dict, validation_level: str = "strict",
                   validation_action: str = "error") -> None:
-    """
-    Apply (or create-with) a schema on a collection.
-
-    validation_level  -> "off" | "moderate" | "strict"
-    validation_action -> "error" (reject invalid docs) | "warn" (log only)
-    """
     try:
         db.create_collection(collection_name, validator=schema,
                              validationLevel=validation_level,
                              validationAction=validation_action)
         print(f"[created] '{collection_name}' with schema.")
     except CollectionInvalid:
-        # Collection already exists -> update its validator instead
+        # Collection already exists -> update validator
         db.command({
             "collMod": collection_name,
             "validator": schema,
@@ -70,7 +51,6 @@ def _apply_schema(collection_name: str, schema: dict, validation_level: str = "s
 
 
 def _get_schema(collection_name: str) -> dict:
-    """Return the current validator for a collection, if any."""
     info = db.command("listCollections", filter={"name": collection_name})
     batch = info.get("cursor", {}).get("firstBatch", [])
     if not batch:
@@ -79,7 +59,6 @@ def _get_schema(collection_name: str) -> dict:
 
 
 def _drop_schema(collection_name: str) -> None:
-    """Remove validation from a collection (sets an empty validator)."""
     db.command({
         "collMod": collection_name,
         "validator": {},
@@ -89,11 +68,6 @@ def _drop_schema(collection_name: str) -> None:
 
 
 def _validate_document(collection_name: str, document: dict) -> tuple[bool, str]:
-    """
-    Dry-run check: try inserting then rolling back, to see if a document
-    would pass the schema. Returns (is_valid, message).
-    Note: this actually inserts + deletes; only use for testing.
-    """
     coll = db[collection_name]
     try:
         result = coll.insert_one(document)
@@ -102,23 +76,7 @@ def _validate_document(collection_name: str, document: dict) -> tuple[bool, str]
     except OperationFailure as e:
         return False, str(e)
 
-
-# ---------------------------------------------------------------------------
-# GUILD CONFIG SCHEMA (Discord bot) — mirrors the mongoose IGuildConfig shape
-# ---------------------------------------------------------------------------
-
 def _guild_config_schema() -> dict:
-    """
-    Equivalent of:
-        interface IGuildConfig {
-            guildId: string;
-            logs: { moderation: { enabled: boolean; channelId: string; } }
-        }
-    Here `guildId` IS the document's `_id` (rather than a separate field),
-    so a guild's config is looked up directly by primary key:
-        db.guild_configs.find_one({"_id": guild_id})
-    Plus createdAt/updatedAt, mirroring mongoose's `{ timestamps: true }`.
-    """
     return _build_schema(
         required=["_id"],
         properties={
@@ -147,7 +105,6 @@ def _guild_config_schema() -> dict:
 
 
 def _default_guild_config(guild_id: str) -> dict:
-    """Default document to insert for a newly-seen guild. Add fields here as your schema grows."""
     from datetime import datetime, timezone
     now = datetime.now(timezone.utc)
     return {
@@ -162,9 +119,7 @@ def _default_guild_config(guild_id: str) -> dict:
         "updatedAt": now,
     }
 
-
 def _get_guild_config(guild_id: str) -> dict:
-    """Fetch a guild's config by its guildId (== _id), creating a default one if it doesn't exist yet."""
     coll = db["guild_configs"]
     doc = coll.find_one({"_id": str(guild_id)})
     if doc is None:
@@ -174,8 +129,6 @@ def _get_guild_config(guild_id: str) -> dict:
 
 
 def _update_guild_config(guild_id: str, updates: dict) -> None:
-    """Merge-update fields in a guild's config (dot-notation supported for nested fields,
-    e.g. {"logs.moderation.enabled": True, "logs.moderation.channelId": "123"})."""
     from datetime import datetime, timezone
     updates["updatedAt"] = datetime.now(timezone.utc)
     db["guild_configs"].update_one(
@@ -185,31 +138,15 @@ def _update_guild_config(guild_id: str, updates: dict) -> None:
     )
 
 def _reset_guild_config(guild_id: str) -> dict:
-    """
-    Reset a guild's config back to defaults, keeping only its _id.
-
-    Use this in on_guild_join — it doesn't matter whether the bot has never
-    seen this guild before or has stale leftover data from a previous stay
-    (e.g. it was kicked and re-invited): replace_one with upsert=True just
-    overrides whatever is there (or inserts fresh if nothing is there).
-    """
     fresh = _default_guild_config(guild_id)
     db["guild_configs"].replace_one({"_id": str(guild_id)}, fresh, upsert=True)
     return fresh
 
 def _has_non_default_values(guild_id: str) -> bool:
-    """
-    Check whether a guild's config has any customized (non-default) values.
-    Ignores _id and the createdAt/updatedAt timestamps, since those are
-    expected to differ naturally and aren't "settings".
-
-    Returns True  -> at least one setting differs from the default
-    Returns False -> everything is still at default (or no doc exists at all)
-    """
     coll = db["guild_configs"]
     doc = coll.find_one({"_id": str(guild_id)})
     if doc is None:
-        return False  # no config yet = effectively default
+        return False  # no config yet -> effectively default
 
     default = _default_guild_config(guild_id)
 
@@ -221,29 +158,23 @@ def _has_non_default_values(guild_id: str) -> bool:
 
 
 def _delete_guild_config(guild_id: str) -> bool:
-    """
-    Remove a guild's config doc entirely from the DB (called when the bot
-    leaves/is removed from a guild). Returns True if a doc was actually
-    deleted, False if there was nothing to delete.
-    """
     result = db["guild_configs"].delete_one({"_id": str(guild_id)})
     return result.deleted_count > 0
 
-intents = dc.Intents.default()
+intents = discord.Intents.default()
 intents.members = True
 intents.presences = True
 intents.guilds = True
-bot = c.Bot(command_prefix='!', intents=intents)
-
+bot = commands.Bot(command_prefix='!', intents=intents)
 
 def _is_dev_user(user_id) -> bool:
     return str(user_id) in DEV_USER_IDS
 
 
 @bot.event
-async def on_guild_join(guild: dc.Guild):
+async def on_guild_join(guild: discord.Guild):
     try:
-        await guild.owner.send(content=f"<@{guild.owner_id}>", embed=Embed(description=f"Thanks for Inviting me to your Server!", color=dc.Color.green()))
+        await guild.owner.send(content=f"<@{guild.owner_id}>", embed=discord.Embed(description=f"Thanks for Inviting me to your Server!", color=discord.Color.green()))
     except discord.Forbidden:
         print(f"Failed to DM {guild.owner} (ID: {guild.owner_id})")
 
@@ -256,15 +187,7 @@ async def on_guild_join(guild: dc.Guild):
 
 
 @bot.event
-async def on_guild_remove(guild: dc.Guild):
-    """
-    Fires when the bot leaves a guild (kicked, banned, or manually removed).
-    NOTE: discord.py's event is called `on_guild_remove`, not
-    `on_guild_leave` — there is no `on_guild_leave` hook in discord.py.
-
-    Cleans up by deleting that guild's config doc from the DB entirely,
-    rather than just resetting it to defaults (as on_guild_join does).
-    """
+async def on_guild_remove(guild: discord.Guild):
     try:
         deleted = _delete_guild_config(str(guild.id))
         if deleted:
@@ -274,12 +197,11 @@ async def on_guild_remove(guild: dc.Guild):
     except Exception as e:
         print(f"Failed to remove config for guild {guild.id} ({guild.name}): {e}")
 
-
 @bot.event
 async def on_ready():
     print(f'Logged in as {bot.user} (ID: {bot.user.id})')
     if DEV_GUILD_ID:
-        dev_guild_obj = dc.Object(id=int(DEV_GUILD_ID))
+        dev_guild_obj = discord.Object(id=int(DEV_GUILD_ID))
         try:
             synced = await bot.tree.sync(guild=dev_guild_obj)
             print(f"Synced {len(synced)} command(s) to dev guild {DEV_GUILD_ID}")
@@ -289,28 +211,21 @@ async def on_ready():
         print("No devGuildId set in config — skipping dev command sync.")
 
 
-# ---------------------------------------------------------------------------
-# DEV-ONLY: /simulate — manually trigger on_guild_join / on_guild_remove
-# against the current guild, to test the DB logic without actually
-# adding/removing the bot from a server. Registered only on devGuildId,
-# and gated to the IDs listed in config["devUserId"].
-# ---------------------------------------------------------------------------
-
 if DEV_GUILD_ID:
     @bot.tree.command(
-        name="simulate",
+        name="emit",
         description="Dev-only: simulate on_guild_join or on_guild_remove for this guild",
-        guild=dc.Object(id=int(DEV_GUILD_ID)),
+        guild=discord.Object(id=int(DEV_GUILD_ID)),
     )
-    @ac.describe(event="Which event to simulate")
-    @ac.choices(event=[
-        ac.Choice(name="guild_join (bot added)", value="join"),
-        ac.Choice(name="guild_remove (bot left/kicked)", value="leave"),
+    @app_commands.describe(event="Which event to simulate")
+    @app_commands.choices(event=[
+        app_commands.Choice(name="guild_join (bot added)", value="join"),
+        app_commands.Choice(name="guild_remove (bot left/kicked)", value="leave"),
     ])
-    async def simulate(interaction: dc.Interaction, event: ac.Choice[str]):
+    async def emit(interaction: discord.Interaction, event: app_commands.Choice[str]):
         if not _is_dev_user(interaction.user.id):
             await interaction.response.send_message(
-                "You are not authorized to use this command.", ephemeral=True
+                "You do not have access to this Command (devOnlyCommand)", ephemeral=True
             )
             return
 
@@ -336,12 +251,17 @@ if DEV_GUILD_ID:
                 ephemeral=True,
             )
 
-
 async def main():
     development_mode = "--development" in sys.argv[1:]
     print(f"Attempting to log into {'Development' if development_mode else 'Production'} mode")
     token = config["devToken"] if development_mode else config["token"]
+
+    print("cwd:", os.getcwd())
+    print("sys.path:")
+    for p in sys.path:
+        print("  ", p)
     async with bot:
+        await bot.load_extension("cogs.ticket.ticket")
         await bot.start(token)
 
 asyncio.run(main())
