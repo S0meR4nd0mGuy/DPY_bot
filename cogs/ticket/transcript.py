@@ -15,6 +15,7 @@ import unicodedata
 from datetime import datetime, timezone
 
 import discord
+from loguru import logger
 
 TRANSCRIPTS_DIR = os.path.join(os.getcwd(), "transcripts")
 
@@ -38,11 +39,17 @@ async def fetch_all_messages(channel: discord.abc.Messageable) -> list[discord.M
     messages = []
     async for message in channel.history(limit=None, oldest_first=True):
         messages.append(message)
+    logger.debug(f"[fetch_all_messages] fetched {len(messages)} message(s) from #{channel}")
     return messages
 
 
 def filter_out_bot_messages(messages: list[discord.Message]) -> list[discord.Message]:
-    return [msg for msg in messages if not msg.author.bot]
+    filtered = [msg for msg in messages if not msg.author.bot]
+    logger.debug(
+        f"[filter_out_bot_messages] kept {len(filtered)}/{len(messages)} message(s) "
+        f"after removing bot messages"
+    )
+    return filtered
 
 
 def format_message_line(msg: discord.Message) -> str:
@@ -81,6 +88,7 @@ def write_transcript_file(channel: discord.abc.GuildChannel, transcript_text: st
     with open(file_path, "w", encoding="utf-8") as f:
         f.write(transcript_text)
 
+    logger.debug(f"[write_transcript_file] wrote transcript to {file_path}")
     return file_path
 
 async def generate_transcript(channel: discord.abc.GuildChannel) -> str:
